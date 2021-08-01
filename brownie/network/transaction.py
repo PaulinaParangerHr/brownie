@@ -652,14 +652,20 @@ class TransactionReceipt:
             if step["op"] == "REVERT" and int(step["stack"][-2], 16):
                 # get returned error string from stack
                 data = _get_memory(step, -1)
-                if data[:4].hex() == "0x4e487b71":  # keccak of Panic(uint256)
+
+                selector = data[:4].hex()
+
+                if selector == "0x4e487b71":  # keccak of Panic(uint256)
                     error_code = int(data[4:].hex(), 16)
                     if error_code in SOLIDITY_ERROR_CODES:
                         self._revert_msg = SOLIDITY_ERROR_CODES[error_code]
                     else:
                         self._revert_msg = f"Panic (error code: {error_code})"
-                else:
+                elif selector == "0x08c379a0":  # keccak of Error(string)
                     self._revert_msg = decode_abi(["string"], data[4:])[0]
+                else:
+                    # TODO: actually parse the data
+                    self._revert_msg = f"typed error: {data.hex()}"
 
             elif self.contract_address:
                 self._revert_msg = "invalid opcode" if step["op"] == "INVALID" else ""
@@ -704,7 +710,6 @@ class TransactionReceipt:
                         step["source"] = trace[idx]["source"]
                         step = trace[idx]
 
-                    # breakpoint()
                     if "dev" in pc_map[step["pc"]]:
                         self._dev_revert_msg = pc_map[step["pc"]]["dev"]
                     else:
@@ -722,7 +727,7 @@ class TransactionReceipt:
                             self._dev_revert_msg = revert_str
 
                     if self._revert_msg is None:
-                        self._revert_msg = self._dev_revert_msg
+                        self._revert_msg = self._dev_revert_msg or ""
                     return
                 except (KeyError, AttributeError, TypeError, ValueError):
                     pass
@@ -1357,7 +1362,7 @@ def _get_last_map(address: EthAddress, sig: str) -> Dict:
         if isinstance(contract._project, project_main.Project):
             # only evaluate coverage for contracts that are part of a `Project`
             last_map["coverage"] = True
-            if contract._build["language"] == "Solidity":
+            if contract._build.get("language") == "Solidity":
                 last_map["active_branches"] = set()
     else:
         last_map.update(contract=None, internal_calls=[f"<UnknownContract>.{sig}"], pc_map=None)
